@@ -1,1 +1,21 @@
-
+name: Omniva asukohad
+on:
+  schedule:
+    - cron: '30 4 * * *'   # iga päev 04:30 UTC
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node build.mjs
+      - run: |
+          git config user.name "omniva-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add omniva-ee.js omniva-ee.json
+          git diff --cached --quiet || git commit -m "Omniva $(date -u +%F)"
+          git push
