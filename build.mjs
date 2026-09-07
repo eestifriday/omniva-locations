@@ -1,42 +1,36 @@
-name: Omniva asukohad
+import { writeFile } from 'node:fs/promises';
 
-on:
-  schedule:
-    - cron: '30 4 * * *'   # iga päev 04:30 UTC (07:30 Eesti suveajal)
-  workflow_dispatch:
+const res = await fetch('https://www.omniva.ee/locationsfull.json', {
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Accept': 'application/json',
+  },
+});
+if (!res.ok) throw new Error(`Omniva vastas ${res.status}`);
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+const all = await res.json();
+if (!Array.isArray(all) || all.length < 100) {
+  throw new Error('Kahtlaselt vähe kirjeid, ei kirjuta üle');
+}
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
+const locations = all
+  .filter(l => l.A0_NAME === 'EE' && l.TYPE === '0')
+  .map(l => ({
+    zip: l.ZIP,                // Omniva saadetistes on see automaadi ID
+    name: l.NAME,
+    county: l.A1_NAME,
+    city: l.A2_NAME,
+    address: `${l.A5_NAME} ${l.A7_NAME}`.trim() || l.A6_NAME,
+    lat: +l.Y_COORDINATE,
+    lng: +l.X_COORDINATE,
+  }))
+  .sort((a, b) =>
+    a.county.localeCompare(b.county, 'et') || a.name.localeCompare(b.name, 'et')
+  );
 
-jobs:
-  build-deploy:
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: node build.mjs
-      - name: Commit muudatused
-        run: |
-          git config user.name "omniva-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add omniva-ee.js omniva-ee.json
-          git diff --cached --quiet || git commit -m "Omniva $(date -u +%F)"
-          git push
-      - name: Failid Pages'i kausta
-        run: mkdir -p site && cp omniva-ee.js omniva-ee.json site/
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+const payload = { updated: new Date().toISOString(), locations };
+
+await writeFile('omniva-ee.json', JSON.stringify(payload));
+await writeFile('omniva-ee.js', `window.omnivaEE = ${JSON.stringify(payload)};\n`);
+
+console.log(`${locations.length} pakiautomaati kirjutatud`);
